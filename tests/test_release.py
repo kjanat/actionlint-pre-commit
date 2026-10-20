@@ -5,7 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from scripts.release import (
     HOOKS,
@@ -451,6 +451,19 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError) as failure:
             run(sys.executable, "-c", "raise SystemExit(7)")
         self.assertEqual(failure.exception.returncode, 7)
+
+    def test_overflow_terminates_unreaped_process_only_once(self):
+        process = MagicMock()
+        process.poll.return_value = None
+        process.stdout.read1.return_value = b"oversized"
+        with (
+            patch("scripts.release.subprocess.Popen") as start,
+            patch("scripts.release.os.killpg", create=True) as kill_group,
+        ):
+            start.return_value.__enter__.return_value = process
+            with self.assertRaisesRegex(ValueError, "output exceeds"):
+                run("fixture-command", limit=2)
+            self.assertEqual(process.kill.call_count + kill_group.call_count, 1)
 
 
 if __name__ == "__main__":

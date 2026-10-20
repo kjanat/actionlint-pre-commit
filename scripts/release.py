@@ -112,9 +112,17 @@ def run(
             start_new_session=os.name != "nt",
         ) as process:
             timed_out = threading.Event()
+            termination_lock = threading.Lock()
+            termination_sent = False
 
             def terminate() -> None:
-                if process.poll() is None:
+                nonlocal termination_sent
+                with termination_lock:
+                    if termination_sent or process.poll() is not None:
+                        return
+                    # A killed, unreaped process can still report no exit status.
+                    # Never signal its group a second time during final cleanup.
+                    termination_sent = True
                     try:
                         if os.name == "nt":
                             process.kill()
