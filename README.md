@@ -117,6 +117,18 @@ A separate CI job reads an existing public source attestation with this
 repository's own `GITHUB_TOKEN`, checking cross-repository API access independently
 of the future v2 publication.
 
+After installing the signing authorization, run the live signing probe:
+
+```sh
+gh workflow run signing-probe.yml --repo kjanat/actionlint-pre-commit --ref master
+```
+
+This manual workflow obtains a real GitHub OIDC token and uses the same pinned
+signing client as publication. It signs a temporary commit and annotated tag,
+then verifies both with the service's public key in an isolated keyring. It has
+no repository write permission, checkout or Git remote; no refs or releases are
+published. The run summary records the verified object IDs.
+
 Candidate verification follows the MIT-licensed actionlint release tooling.
 The test wheel launcher follows actionlint's existing PyPI launcher's process
 behavior; see `LICENSE`.

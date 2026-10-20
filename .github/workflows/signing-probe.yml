@@ -1,0 +1,69 @@
+name: Verify live OIDC signing
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  signing:
+    if: github.repository_id == '1427230928' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: { id-token: write }
+    env:
+      GPG_SIGN_URL: https://gpg.kajkowalski.nl
+      GPG_SIGN_KEY_ID: ${{ vars.GPG_SIGN_KEY_ID }}
+    steps:
+      - name: Install the pinned signing client
+        shell: bash
+        run: |
+          curl --fail --location --proto '=https' --tlsv1.2 --max-time 60 \
+            https://github.com/kjanat/gpg-signing-service/releases/download/v1.2.0/gpg-sign-linux-amd64 \
+            --output "${RUNNER_TEMP}/gpg-sign"
+          printf '%s  %s\n' 44a9911aa501058bea67bcd3fe0ad8e5fc9dbf5f27c16a1833bb334f51b7e73b "${RUNNER_TEMP}/gpg-sign" | sha256sum --check
+          chmod +x "${RUNNER_TEMP}/gpg-sign"
+          echo "${RUNNER_TEMP}" >> "${GITHUB_PATH}"
+      - name: Sign and verify an ephemeral commit and annotated tag
+        shell: bash
+        run: |
+          test "${GPG_SIGN_KEY_ID}" = AFD5E3EC68371856
+          token="$(curl --fail --silent --show-error --max-time 30 \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=gpg-signing-service" | jq -er .value)"
+          echo "::add-mask::${token}"
+          export GPG_SIGN_TOKEN="${token}"
+
+          # No checkout or remote: the probe cannot publish Git refs.
+          probe="$(mktemp -d "${RUNNER_TEMP}/signing-probe.XXXXXXXX")"
+          trap 'rm -rf -- "${probe}"' EXIT
+          export GNUPGHOME="${probe}/gnupg"
+          mkdir -m 700 "${GNUPGHOME}"
+          gpg-sign public-key --key-id "${GPG_SIGN_KEY_ID}" > "${probe}/public-key.asc"
+          gpg --batch --import "${probe}/public-key.asc"
+
+          git init --initial-branch=master "${probe}/repository"
+          cd "${probe}/repository"
+          git config user.name "Kaj Kowalski"
+          git config user.email "info@kajkowalski.nl"
+          git -c commit.gpgsign=false commit --allow-empty -m "Signing probe base"
+          base="$(git rev-parse HEAD)"
+          git -c commit.gpgsign=false commit --allow-empty -m "Verify GitHub OIDC signing"
+          gpg-sign sign-commit --base "${base}" --key-id "${GPG_SIGN_KEY_ID}"
+          git verify-commit HEAD
+          commit="$(git rev-parse HEAD)"
+
+          tag=signing-probe
+          tagger="$(git var GIT_COMMITTER_IDENT)"
+          printf 'object %s\ntype commit\ntag %s\ntagger %s\n\n%s\n' \
+            "${commit}" "${tag}" "${tagger}" "${tag}" > "${probe}/tag"
+          gpg-sign sign --key-id "${GPG_SIGN_KEY_ID}" \
+            < "${probe}/tag" > "${probe}/signature"
+          cat "${probe}/signature" >> "${probe}/tag"
+          object="$(git mktag < "${probe}/tag")"
+          git update-ref "refs/tags/${tag}" "${object}" 0000000000000000000000000000000000000000
+          git verify-tag "${tag}"
+          test "$(git rev-parse "${tag}^{commit}")" = "${commit}"
+          test -z "$(git remote)"
+          {
+            printf 'Live GitHub OIDC signing verified with key %s.\n\n' "${GPG_SIGN_KEY_ID}"
+            printf 'Verified commit: %s\n\nVerified annotated tag object: %s\n\n' "${commit}" "${object}"
+            printf 'Temporary repository and keyring removed. No remote refs or releases published.\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
