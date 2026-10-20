@@ -1,0 +1,13 @@
+- id: actionlint
+  name: Lint GitHub Actions workflow files
+  language: python
+  entry: actionlint pre-commit
+  pass_filenames: false
+  always_run: true
+  minimum_pre_commit_version: "3.0.0"
+- id: actionlint-system
+  name: Lint GitHub Actions workflow files (system)
+  language: system
+  entry: actionlint pre-commit
+  pass_filenames: false
+  always_run: true

@@ -1,0 +1,74 @@
+name: Publish verified actionlint hooks
+run-name: Beepboop ${{ inputs.operation_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      source_repository_id: { description: Immutable actionlint repository ID, required: true, type: string }
+      release_id: { description: Published upstream release ID, required: true, type: string }
+      source_sha: { description: Exact upstream tagged commit, required: true, type: string }
+      operation_id: { description: Beepboop operation identity, required: true, type: string }
+      dry_run: { description: Verify without changing or publishing anything, type: boolean, default: false }
+permissions: { contents: read }
+concurrency: { group: publish-hooks, cancel-in-progress: false, queue: max }
+jobs:
+  release:
+    if: github.repository == 'kjanat/actionlint-pre-commit' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions: { contents: write, actions: read, attestations: read, id-token: write }
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_REPOSITORY_ID: ${{ inputs.source_repository_id }}
+      RELEASE_ID: ${{ inputs.release_id }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      OPERATION_ID: ${{ inputs.operation_id }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { ref: master, fetch-depth: 0 }
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with: { python-version: "3.13" }
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends skopeo
+      - run: python -m unittest discover -s tests -v
+      - name: Verify exact upstream publication
+        id: prepare
+        shell: bash
+        run: |
+          args=()
+          if [[ "${DRY_RUN}" == true ]]; then args+=(--dry-run); fi
+          python -m scripts.release \
+            --source-repository-id "${SOURCE_REPOSITORY_ID}" \
+            --release-id "${RELEASE_ID}" --source-sha "${SOURCE_SHA}" \
+            --operation-id "${OPERATION_ID}" "${args[@]}"
+      - name: Check the installable hook package
+        if: ${{ !inputs.dry_run }}
+        run: |
+          python -m pip install pre-commit==4.3.0 .
+          python -m pre_commit validate-manifest .pre-commit-hooks.yaml
+          actionlint --version
+          binary="$(python -c 'import pathlib, actionlint_kjanat; print(pathlib.Path(actionlint_kjanat.__file__).parent / "bin" / "actionlint")')"
+          python -m scripts.integration --binary "${binary}"
+      - name: Install the pinned signing client
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        run: |
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            https://github.com/kjanat/gpg-signing-service/releases/download/v1.2.0/gpg-sign-linux-amd64 \
+            --output "${RUNNER_TEMP}/gpg-sign"
+          printf '%s  %s\n' 44a9911aa501058bea67bcd3fe0ad8e5fc9dbf5f27c16a1833bb334f51b7e73b "${RUNNER_TEMP}/gpg-sign" | sha256sum --check
+          chmod +x "${RUNNER_TEMP}/gpg-sign"
+          echo "${RUNNER_TEMP}" >> "${GITHUB_PATH}"
+      - name: Sign and publish
+        if: ${{ !inputs.dry_run }}
+        env:
+          GPG_SIGN_URL: https://gpg.kajkowalski.nl
+          GPG_SIGN_KEY_ID: ${{ vars.GPG_SIGN_KEY_ID }}
+        shell: bash
+        run: |
+          test -n "${GPG_SIGN_KEY_ID}"
+          token="$(curl --fail --silent --show-error \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=gpg-signing-service" | jq -er .value)"
+          echo "::add-mask::${token}"
+          export GPG_SIGN_TOKEN="${token}"
+          python -m scripts.publish --key-id "${GPG_SIGN_KEY_ID}"
