@@ -75,9 +75,10 @@ the local `GITHUB_TOKEN` to push. Missing signing authorization fails publicatio
 there is no unsigned fallback. The first release also requires an upstream v2
 candidate, published wheels and image.
 
-The repository variable is `GPG_SIGN_KEY_ID=AFD5E3EC68371856`. An administrator
-must authorize its immutable GitHub OIDC master subject through the signing
-service API; this trust is not yet installed:
+The repository variable is `GPG_SIGN_KEY_ID=AFD5E3EC68371856`. Its immutable
+GitHub OIDC master subject was authorized on 2026-10-20 through the signing
+service API and read back as active, restricted to this key. The authorization
+ID is `4bb06b10-aedc-49f5-9bea-a81245c870c0`. The request used was:
 
 ```http
 POST https://gpg.kajkowalski.nl/admin/subjects
@@ -128,6 +129,11 @@ signing client as publication. It signs a temporary commit and annotated tag,
 then verifies both with the service's public key in an isolated keyring. It has
 no repository write permission, checkout or Git remote; no refs or releases are
 published. The run summary records the verified object IDs.
+
+[The live probe passed on 2026-10-20](https://github.com/kjanat/actionlint-pre-commit/actions/runs/39469327500/attempts/2):
+GitHub OIDC authorized both signing requests, and GPG verified the resulting
+commit and annotated tag. This verifies signing, not the first upstream v2
+publication.
 
 Candidate verification follows the MIT-licensed actionlint release tooling.
 The test wheel launcher follows actionlint's existing PyPI launcher's process
