@@ -36,7 +36,7 @@ jobs:
           ref: 6e394c888293218fac952ba8a8681739b0c4c2c3
           path: .host
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with: { go-version-file: .host/go.mod, cache-dependency-path: .host/go.sum }
       - name: Build the actual host
         working-directory: .host
